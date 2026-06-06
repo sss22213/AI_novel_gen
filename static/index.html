@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="app_title">AI 小說生成器</title>
+    <link rel="stylesheet" href="/static/style.css?v=3">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="lang-switch">
+                <select id="ui-lang" title="Language"></select>
+            </div>
+            <h1 data-i18n="app_title">AI 小說生成器</h1>
+            <p class="subtitle" data-i18n="app_subtitle">透過本地 Ollama 創作小說</p>
+            <nav class="tabs">
+                <button class="tab-btn active" data-tab="create" data-i18n="tab_create">創作</button>
+                <button class="tab-btn" data-tab="history" data-i18n="tab_history">歷史</button>
+            </nav>
+        </header>
+
+        <main>
+            <!-- ===== 創作頁 ===== -->
+            <div id="tab-create" class="tab-panel active">
+                <div class="layout">
+                    <section class="panel panel-controls">
+                        <div class="field">
+                            <label for="model" data-i18n="label_model">模型</label>
+                            <div class="row">
+                                <select id="model"></select>
+                                <button id="refresh-models" class="btn-ghost" title="↻">⟳</button>
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="template" data-i18n="label_template">範本</label>
+                            <div class="row">
+                                <select id="template"></select>
+                                <button id="save-template" class="btn-ghost" data-i18n-title="btn_save_template" title="存為範本">＋</button>
+                                <button id="delete-template" class="btn-ghost" data-i18n-title="btn_delete_template" title="刪除範本" hidden>🗑</button>
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="genre" data-i18n="label_genre">小說類型 / 風格</label>
+                            <select id="genre"></select>
+                        </div>
+
+                        <div class="field">
+                            <label for="language" data-i18n="label_language">輸出語言</label>
+                            <select id="language"></select>
+                        </div>
+
+                        <div class="field">
+                            <label for="length" data-i18n="label_length">字數長度</label>
+                            <select id="length">
+                                <option value="1000" data-i18n="len_short">短篇（約 1000 字）</option>
+                                <option value="3000" selected data-i18n="len_medium">中篇（約 3000 字）</option>
+                                <option value="6000" data-i18n="len_long">長篇（約 6000 字）</option>
+                                <option value="10000" data-i18n="len_xlong">超長篇（約 10000 字）</option>
+                                <option value="custom" data-i18n="len_custom">自訂</option>
+                            </select>
+                            <input id="length-custom" type="number" min="100" max="30000" step="100" data-i18n-ph="ph_custom_length" placeholder="自訂字數" hidden>
+                        </div>
+
+                        <div class="field">
+                            <label for="temperature"><span data-i18n="label_temperature">創意度 (Temperature)</span> <span id="temp-value">0.85</span></label>
+                            <input id="temperature" type="range" min="0" max="2" step="0.05" value="0.85">
+                            <div class="hint">
+                                <span data-i18n="hint_strict">嚴謹</span>
+                                <span data-i18n="hint_creative">創意</span>
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="system" data-i18n="label_system">系統提示詞（可選）</label>
+                            <textarea id="system" rows="2" data-i18n-ph="ph_system" placeholder="留空使用預設提示詞"></textarea>
+                        </div>
+
+                        <div class="field">
+                            <label for="style-sample" data-i18n="label_style_sample">參考範文（可選）</label>
+                            <textarea id="style-sample" rows="3" data-i18n-ph="ph_style_sample" placeholder="貼上一段想模仿文風的範文..."></textarea>
+                        </div>
+
+                        <div class="field">
+                            <label for="keywords"><span data-i18n="label_keywords">關鍵字 / 大綱</span> <span class="required">*</span></label>
+                            <textarea id="keywords" rows="5" data-i18n-ph="ph_keywords" placeholder="例：..."></textarea>
+                        </div>
+
+                        <div class="actions">
+                            <button id="generate" class="btn-primary" data-i18n="btn_generate">生成小說</button>
+                            <button id="stop" class="btn-danger" data-i18n="btn_stop" hidden>停止</button>
+                        </div>
+                    </section>
+
+                    <section class="panel panel-output">
+                        <div class="output-header">
+                            <h2 data-i18n="output_title">輸出</h2>
+                            <div class="output-actions">
+                                <button id="copy" class="btn-ghost" data-i18n="btn_copy">複製</button>
+                                <button id="download" class="btn-ghost" data-i18n="btn_download">下載</button>
+                                <button id="clear" class="btn-ghost" data-i18n="btn_clear">清空</button>
+                            </div>
+                        </div>
+                        <div id="status" class="status"></div>
+                        <div id="output" class="output" data-i18n-ph="output_placeholder" data-placeholder="輸出將顯示於此..."></div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- ===== 歷史頁 ===== -->
+            <div id="tab-history" class="tab-panel">
+                <div class="layout layout-history">
+                    <section class="panel panel-history-list">
+                        <div class="output-header">
+                            <h2><span data-i18n="history_title">歷史紀錄</span> <span id="history-count" class="count-badge">0</span></h2>
+                            <div class="output-actions">
+                                <button id="history-refresh" class="btn-ghost" data-i18n="history_refresh">重新整理</button>
+                                <button id="history-clear-all" class="btn-ghost btn-danger-ghost" data-i18n="clear_all">清空全部</button>
+                            </div>
+                        </div>
+                        <div id="history-list" class="history-list"></div>
+                    </section>
+
+                    <section class="panel panel-history-detail">
+                        <div id="history-empty" class="history-empty" data-i18n="history_empty_select">從左側選擇一筆紀錄</div>
+                        <div id="history-detail" class="history-detail" hidden>
+                            <div class="output-header">
+                                <h2 id="detail-title">—</h2>
+                                <div class="output-actions">
+                                    <button id="detail-load" class="btn-primary btn-sm" data-i18n="detail_load">載入此設定</button>
+                                    <button id="detail-copy" class="btn-ghost" data-i18n="btn_copy">複製</button>
+                                    <button id="detail-download" class="btn-ghost" data-i18n="btn_download">下載</button>
+                                    <button id="detail-delete" class="btn-danger btn-sm" data-i18n="btn_delete">刪除</button>
+                                </div>
+                            </div>
+                            <div id="detail-meta" class="detail-meta"></div>
+                            <div id="detail-content" class="output"></div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/i18n.js?v=3"></script>
+    <script src="/static/app.js?v=3"></script>
+</body>
+</html>

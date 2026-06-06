@@ -1,0 +1,35 @@
+# ===== 執行時產生的資料 =====
+# 歷史紀錄與使用者自訂範本（app 啟動時會自動重建 data/ 目錄）
+data/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+build/
+dist/
+
+# ===== 虛擬環境 =====
+.venv/
+venv/
+env/
+ENV/
+
+# ===== 環境變數 =====
+.env
+.env.*
+
+# ===== IDE / 編輯器 =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== 作業系統 =====
+.DS_Store
+Thumbs.db
+
+# ===== Claude Code（本地設定 / 記憶） =====
+.claude/

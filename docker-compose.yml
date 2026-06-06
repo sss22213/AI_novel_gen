@@ -1,0 +1,15 @@
+services:
+  novel-webui:
+    build: .
+    container_name: ai-novel-webui
+    ports:
+      - "6789:6789"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 6789
+      OLLAMA_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
