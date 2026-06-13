@@ -1,6 +1,6 @@
 # AI Novel Generator
 
-A web tool for writing novels with local [Ollama](https://ollama.com/) models. Enter a keyword or outline, pick a model, genre, language and length, then stream a novel in real time — with automatic history saving.
+A web tool for writing novels with **local [Ollama](https://ollama.com/) models or the [Claude](https://claude.com/claude-code) CLI** (your Claude subscription login). Enter a keyword or outline, pick an engine and model, genre, language and length, then stream a novel in real time — with automatic history saving.
 
 > ### 🤝 About this project
 > **This project was built collaboratively by a human and an AI (Anthropic Claude).**
@@ -10,8 +10,9 @@ A web tool for writing novels with local [Ollama](https://ollama.com/) models. E
 
 ## ✨ Features
 
-- **Streaming generation** — text appears word by word as it's written, ChatGPT-style; stop any time.
-- **Model dropdown** — automatically lists every model installed in your local Ollama; refreshable on demand.
+- **Two AI engines** — generate with local **Ollama** models or the **Claude CLI** (your Claude subscription login), switchable from an *AI engine* dropdown. See [Enabling the Claude engine](#enabling-the-claude-engine).
+- **Streaming generation** — text appears word by word as it's written, ChatGPT-style; stop any time. (For Claude "thinking" models, the internal reasoning is filtered out and only the story is streamed.)
+- **Model dropdown** — lists the models for the selected engine: every model installed in your local Ollama (refreshable on demand), or the configured Claude aliases (`opus` / `sonnet` / `haiku`).
 - **Rich writing controls**
   - Genre / style (Wuxia, Sci-Fi, Romance, Mystery, Fantasy, Adult… 12 in total)
   - Length (short / medium / long / very long / custom)
@@ -24,7 +25,7 @@ A web tool for writing novels with local [Ollama](https://ollama.com/) models. E
   - 5 built-in starter templates (Wuxia, Sci-Fi, Romance, Mystery, Fantasy)
   - Save the current settings (including the reference style sample) as a custom template for reuse
 - **History** — every completed generation is saved automatically with its settings and full text; browse, copy, download, load settings, and **delete individually** or **clear all**.
-- **Robust handling** — automatically deals with "thinking" models (`think:false`) and waits/retries while a model is loading, so it no longer hangs.
+- **Robust handling** — filters out "thinking" models' internal reasoning, retries on empty output, and waits/retries while an Ollama model is loading, so it no longer hangs.
 
 ---
 
@@ -32,9 +33,9 @@ A web tool for writing novels with local [Ollama](https://ollama.com/) models. E
 
 | Layer | Technology |
 |---|---|
-| Backend | Python + [FastAPI](https://fastapi.tiangolo.com/) + [httpx](https://www.python-httpx.org/) (streaming proxy to Ollama) |
+| Backend | Python + [FastAPI](https://fastapi.tiangolo.com/) + [httpx](https://www.python-httpx.org/) (streaming proxy to Ollama) + `claude` CLI subprocess |
 | Frontend | Vanilla HTML / CSS / JavaScript (no framework, no build step) |
-| Model | Local [Ollama](https://ollama.com/) |
+| Engines | Local [Ollama](https://ollama.com/) · [Claude](https://claude.com/claude-code) CLI (subscription login) |
 | Deployment | Docker / Docker Compose |
 | Storage | JSON files (history, custom templates), persisted via a mounted volume |
 
@@ -45,6 +46,7 @@ A web tool for writing novels with local [Ollama](https://ollama.com/) models. E
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
 - [Ollama](https://ollama.com/) installed and running on the host, with at least one model pulled
 - Enough RAM / VRAM to load the models you intend to use
+- *(Optional — for the Claude engine)* the [Claude CLI](https://claude.com/claude-code) logged in. It's bundled into the Docker image; you only need to mount your credentials (see [Enabling the Claude engine](#enabling-the-claude-engine)). For local runs, install and log in to `claude` on the host.
 
 ---
 
@@ -75,16 +77,41 @@ python app.py
 
 ## ⚙️ Configuration
 
-Set via environment variables (in `docker-compose.yml` or your shell):
+Configuration is done entirely through environment variables. For Docker, copy
+the template to `.env` and edit it — Docker Compose reads `.env` automatically:
+
+```bash
+cp .env.example .env
+```
 
 | Variable | Default | Description |
 |---|---|---|
-| `OLLAMA_URL` | `http://host.docker.internal:11434` | Ollama API address |
+| `PORT` | `6789` | WebUI port |
+| `OLLAMA_URL` | `http://host.docker.internal:11434` | Ollama API address. Inside the container, reach the host via `host.docker.internal` — do **not** use `localhost`. |
 | `HOST` | `0.0.0.0` (in container) | Bind address |
-| `PORT` | `6789` | Port |
 | `DATA_DIR` | `./data` | Directory for history and templates |
+| `CLAUDE_CREDS_DIR` | *(empty)* | Absolute path to your logged-in Claude credentials (usually `~/.claude`), mounted into the container to enable the Claude engine. Empty → Claude engine stays unavailable (Ollama still works). |
+| `CLAUDE_MODELS` | `sonnet,opus,haiku` | Comma-separated Claude model aliases shown in the dropdown (`claude --model` accepts aliases). |
+| `CLAUDE_BIN` | `claude` | Path to the `claude` executable (defaults to the version installed in the image). |
 
 > **Can't reach Ollama?** Make sure Ollama listens on all interfaces: `OLLAMA_HOST=0.0.0.0 ollama serve`, or switch the compose file to `network_mode: host`.
+
+### Enabling the Claude engine
+
+The app can generate with either **local Ollama** or the **Claude CLI** (your
+Claude subscription login), selectable from the **AI engine** dropdown.
+
+- **Docker:** the image installs the `claude` CLI for you; point `CLAUDE_CREDS_DIR`
+  at your host `~/.claude` so the container can authenticate:
+
+  ```bash
+  echo "CLAUDE_CREDS_DIR=$HOME/.claude" >> .env
+  docker compose up -d --build
+  ```
+
+- **Local (no Docker):** just have `claude` installed and logged in on the host;
+  it is auto-detected (via `PATH` or common install locations such as
+  `~/.local/bin/claude`). Set `CLAUDE_BIN` to an absolute path to override.
 
 ---
 
@@ -92,8 +119,8 @@ Set via environment variables (in `docker-compose.yml` or your shell):
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/models` | List installed Ollama models |
-| `POST` | `/api/generate` | Stream-generate a novel (plain-text stream) |
+| `GET` | `/api/models?engine=ollama\|claude` | List models for the engine: installed Ollama models, or Claude aliases (with availability + resolved path) |
+| `POST` | `/api/generate` | Stream-generate a novel (plain-text stream). Request body includes `engine` (`ollama` or `claude`) |
 | `GET` | `/api/history` | History list (summaries) |
 | `POST` | `/api/history` | Add a history record |
 | `GET` | `/api/history/{id}` | Get one record (full text + settings) |
@@ -109,16 +136,18 @@ Set via environment variables (in `docker-compose.yml` or your shell):
 
 ```
 .
-├── app.py                # FastAPI backend (models, generation stream, history, templates)
+├── app.py                # FastAPI backend (Ollama + Claude engines, generation stream, history, templates)
 ├── requirements.txt
-├── Dockerfile
+├── Dockerfile            # Python image; also installs the claude CLI
 ├── docker-compose.yml
+├── .env.example          # Configuration template (copy to .env)
 ├── static/
 │   ├── index.html        # UI structure
 │   ├── style.css         # Styles
-│   ├── app.js            # Frontend logic (generation, history, templates, i18n)
+│   ├── app.js            # Frontend logic (engine/model select, generation, history, templates, i18n)
 │   └── i18n.js           # Language dictionary and genre mapping
 ├── data/                 # Created at runtime: history.json / templates.json (gitignored)
+├── ARCHITECTURE.md       # Architecture notes
 ├── LICENSE               # GPL-3.0
 └── README.md
 ```
@@ -127,7 +156,7 @@ Set via environment variables (in `docker-compose.yml` or your shell):
 
 ## 💡 Tips
 
-- **Pick the right model**: for fiction, prefer non-"thinking" instruct models (e.g. Gemma, Qwen2.5-Instruct, Llama). "Thinking" models such as `qwen3*` / `gpt-oss` spend their budget on internal reasoning; the app mitigates this with `think:false`, but instruct models still give the best experience.
+- **Pick the right model**: for fiction on Ollama, prefer non-"thinking" instruct models (e.g. Gemma, Qwen2.5-Instruct, Llama). "Thinking" models such as `qwen3*` / `gpt-oss` spend part of their budget on internal reasoning; the app filters that out and gives the story room to generate, but instruct models still give the best experience. On the **Claude** engine, `opus` gives the strongest prose and `haiku` the fastest.
 - **First load takes time**: large models (20GB+) need tens of seconds to load on the first generation. The screen stays on "Generating…" during this — that's normal; output begins once loading finishes.
 - **"Adult" genre**: ordinary instruct models may refuse; pair it with an uncensored / abliterated model.
 - **Your data**: history and custom templates live in `data/`. Back it up yourself; `docker compose down` does not delete it (it's a host-mounted volume).
