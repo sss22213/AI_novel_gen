@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+import shlex
+import shutil
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -12,6 +14,55 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+
+# Claude CLI 引擎：透過本機 `claude` 指令（你的訂閱登入）生成。
+# 需在主機執行模式下，claude 已安裝並在 PATH。
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
+# claude --model 接受別名（opus/sonnet/haiku/fable…）；用別名才不會綁死版本。
+# 逗號分隔，可用環境變數 CLAUDE_MODELS 覆寫。
+CLAUDE_MODELS = [
+    m.strip() for m in os.environ.get("CLAUDE_MODELS", "sonnet,opus,haiku").split(",") if m.strip()
+]
+# 附加給 claude 的額外參數（進階用），例如 "--max-turns 1"
+CLAUDE_EXTRA_ARGS = shlex.split(os.environ.get("CLAUDE_EXTRA_ARGS", ""))
+
+_CLAUDE_LABELS = {
+    "opus": "Claude Opus",
+    "sonnet": "Claude Sonnet",
+    "haiku": "Claude Haiku",
+    "fable": "Fable",
+}
+
+
+def _claude_label(alias):
+    return _CLAUDE_LABELS.get(alias.lower(), alias)
+
+
+def _resolve_claude():
+    """找出 claude CLI 的可執行路徑。
+    優先順序：CLAUDE_BIN（可為絕對路徑或指令名）→ PATH → 常見安裝位置。
+    找不到回 None。這樣即使 ~/.local/bin 不在 PATH 也能自動找到。"""
+    cand = CLAUDE_BIN
+    # 1) 明確路徑（含分隔符）
+    if os.path.sep in cand:
+        return cand if os.access(cand, os.X_OK) else None
+    # 2) PATH
+    found = shutil.which(cand)
+    if found:
+        return found
+    # 3) 常見安裝位置
+    home = os.path.expanduser("~")
+    for p in (
+        os.path.join(home, ".local", "bin", "claude"),
+        os.path.join(home, ".npm-global", "bin", "claude"),
+        os.path.join(home, ".bun", "bin", "claude"),
+        "/usr/local/bin/claude",
+        "/usr/bin/claude",
+        "/opt/homebrew/bin/claude",
+    ):
+        if os.access(p, os.X_OK):
+            return p
+    return None
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
@@ -151,7 +202,16 @@ async def index():
 
 
 @app.get("/api/models")
-async def list_models():
+async def list_models(engine: str = "ollama"):
+    if engine == "claude":
+        resolved = _resolve_claude()
+        return {
+            "models": CLAUDE_MODELS,
+            "labels": {m: _claude_label(m) for m in CLAUDE_MODELS},
+            "available": resolved is not None,
+            "path": resolved,
+        }
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.get(f"{OLLAMA_URL}/api/tags")
@@ -162,6 +222,86 @@ async def list_models():
 
     models = sorted({m["name"] for m in data.get("models", [])})
     return {"models": models}
+
+
+async def _claude_stream(model, prompt, system):
+    """以本機 claude CLI（print 模式、stream-json）串流生成。
+    只輸出 text_delta；thinking_delta（延伸思考）會被略過，與 Ollama 的 <think> 過濾一致。"""
+    claude_bin = _resolve_claude()
+    if claude_bin is None:
+        yield ("[錯誤] 找不到 claude CLI。請確認主機已安裝並登入，"
+               "或啟動時設定環境變數 CLAUDE_BIN=/絕對/路徑/claude（主機執行模式）。")
+        return
+
+    cmd = [
+        claude_bin, "-p", prompt,
+        "--model", model,
+        "--output-format", "stream-json",
+        "--include-partial-messages",
+        "--verbose",
+        "--tools", "",                 # 停用所有內建工具：純文字生成，不碰檔案系統
+        "--no-session-persistence",    # 不留存 session
+    ]
+    if system:
+        cmd += ["--system-prompt", system]
+    cmd += CLAUDE_EXTRA_ARGS
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd="/tmp",
+        )
+    except FileNotFoundError:
+        yield "[錯誤] 找不到 claude CLI。"
+        return
+
+    got = False
+    final = ""
+    errored = False
+    try:
+        async for raw in proc.stdout:
+            line = raw.decode("utf-8", "ignore").strip()
+            if not line:
+                continue
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            typ = o.get("type")
+            if typ == "stream_event":
+                ev = o.get("event") or {}
+                if ev.get("type") == "content_block_delta":
+                    d = ev.get("delta") or {}
+                    if d.get("type") == "text_delta":
+                        txt = d.get("text") or ""
+                        if txt:
+                            got = True
+                            yield txt
+            elif typ == "result":
+                if o.get("is_error"):
+                    msg = o.get("result") or o.get("error") or "未知錯誤"
+                    errored = True
+                    yield f"\n[錯誤] Claude CLI：{msg}"
+                    break
+                final = o.get("result") or ""
+
+        if not got and not errored:
+            if final:
+                yield final
+            else:
+                err = (await proc.stderr.read()).decode("utf-8", "ignore").strip()
+                yield "\n[提示] Claude CLI 未產生內容。" + (("錯誤：" + err) if err else "")
+    finally:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        await proc.wait()
 
 
 def _make_think_filter():
@@ -221,12 +361,20 @@ def _make_think_filter():
 async def generate(req: Request):
     body = await req.json()
 
+    engine = (body.get("engine") or "ollama").lower()
     model = body.get("model")
     prompt = body.get("prompt")
     if not model or not prompt:
         raise HTTPException(status_code=400, detail="缺少 model 或 prompt")
 
     system = body.get("system") or ""
+
+    if engine == "claude":
+        return StreamingResponse(
+            _claude_stream(model, prompt, system),
+            media_type="text/plain; charset=utf-8",
+        )
+
     temperature = float(body.get("temperature", 0.8))
     # 下限 1024：思考型模型的 <think> 區塊（會被過濾）可能吃光額度，
     # 預留底線確保正文一定有生成空間。

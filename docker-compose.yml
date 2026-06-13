@@ -7,9 +7,15 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 6789
-      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # Claude 引擎（容器內由映像安裝的 claude；認證見下方 volumes）
+      CLAUDE_BIN: ${CLAUDE_BIN:-claude}
+      CLAUDE_MODELS: ${CLAUDE_MODELS:-sonnet,opus,haiku}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
+      # 把主機已登入的 Claude 憑證掛進容器；未設定時掛空目錄 → Claude 引擎顯示不可用，
+      # Ollama 仍正常。於 .env 設定 CLAUDE_CREDS_DIR=/home/<你>/.claude 啟用。
+      - ${CLAUDE_CREDS_DIR:-./.claude-empty}:/root/.claude
     restart: unless-stopped

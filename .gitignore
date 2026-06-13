@@ -19,6 +19,7 @@ ENV/
 # ===== 環境變數 =====
 .env
 .env.*
+!.env.example
 
 # ===== IDE / 編輯器 =====
 .vscode/

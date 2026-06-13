@@ -25,6 +25,7 @@ function tt(key, vars) {
 
 const els = {
     uiLangSel: document.getElementById('ui-lang'),
+    engine: document.getElementById('engine'),
     model: document.getElementById('model'),
     refreshModels: document.getElementById('refresh-models'),
     template: document.getElementById('template'),
@@ -173,14 +174,16 @@ function applyI18n() {
 
 /* ===== 模型 ===== */
 async function loadModels() {
+    const engine = els.engine ? els.engine.value : 'ollama';
     setStatus(tt('status_loading_models'));
     try {
-        const res = await fetch('/api/models');
+        const res = await fetch('/api/models?engine=' + encodeURIComponent(engine));
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.detail || ('HTTP ' + res.status));
         }
         const data = await res.json();
+        const labels = data.labels || {};
         const prev = els.model.value;
         els.model.innerHTML = '';
         // 首項為提示（value 空字串），取代原本的「已載入 N 個模型」狀態文字
@@ -191,11 +194,16 @@ async function loadModels() {
         for (const m of data.models) {
             const opt = document.createElement('option');
             opt.value = m;
-            opt.textContent = m;
+            opt.textContent = labels[m] || m;
             els.model.appendChild(opt);
         }
         els.model.value = (prev && data.models.includes(prev)) ? prev : '';
-        setStatus('');
+        // Claude 引擎但主機找不到 CLI → 提示
+        if (engine === 'claude' && data.available === false) {
+            setStatus(tt('status_claude_unavailable'), 'error');
+        } else {
+            setStatus('');
+        }
     } catch (e) {
         setStatus(tt('status_load_models_fail') + e.message, 'error');
     }
@@ -274,6 +282,7 @@ els.length.addEventListener('change', () => {
 });
 
 els.refreshModels.addEventListener('click', loadModels);
+els.engine.addEventListener('change', loadModels);
 
 function getWordCount() {
     if (els.length.value === 'custom') {
@@ -286,6 +295,7 @@ function getWordCount() {
 /* ===== 設定收集 / 套用 ===== */
 function gatherSettings() {
     return {
+        engine: els.engine.value,
         model: els.model.value,
         genre: els.genre.value,
         language: els.language.value,
@@ -298,8 +308,13 @@ function gatherSettings() {
     };
 }
 
-function applySettings(s) {
+async function applySettings(s) {
     if (!s) return;
+    // 先切引擎並載入對應模型清單，模型才能正確套用
+    if (s.engine && [...els.engine.options].some((o) => o.value === s.engine) && s.engine !== els.engine.value) {
+        els.engine.value = s.engine;
+        await loadModels();
+    }
     if (s.model && [...els.model.options].some((o) => o.value === s.model)) {
         els.model.value = s.model;
     }
@@ -385,6 +400,7 @@ async function generate() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                engine: els.engine.value,
                 model,
                 prompt,
                 system,
@@ -777,14 +793,16 @@ function makeSearchable(select) {
         get() { return valDesc.get.call(select); },
         set(v) { valDesc.set.call(select, v); sync(); },
     });
-    // 選項被重建時同步顯示
-    new MutationObserver(() => sync()).observe(select, { childList: true });
+    // 選項被重建（childList）或 data-i18n 就地改文字（characterData）時同步顯示
+    new MutationObserver(() => sync()).observe(select, {
+        childList: true, subtree: true, characterData: true,
+    });
 
     sync();
 }
 
 /* ===== 初始化 ===== */
-[els.uiLangSel, els.model, els.template, els.genre, els.language, els.length].forEach(makeSearchable);
+[els.uiLangSel, els.engine, els.model, els.template, els.genre, els.language, els.length].forEach(makeSearchable);
 renderUiLangSwitch();
 renderOutputLangs();
 applyI18n();
