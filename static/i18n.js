@@ -68,6 +68,7 @@ const I18N = {
         char_unit: '字',
         status_loading_models: '載入模型清單中...',
         status_models_loaded: '已載入 {n} 個模型',
+        model_hint: '— 共 {n} 個模型，請選擇 —',
         status_generating: '生成中...（首次使用大模型需載入，可能等待數十秒）',
         status_generating_progress: '生成中... {n} {unit} / {t}s',
         status_done_saved: '✓ 完成 {n} {unit} / 耗時 {t}s（已存入歷史）',
@@ -111,6 +112,7 @@ const I18N = {
         char_unit: 'chars',
         status_loading_models: 'Loading models...',
         status_models_loaded: 'Loaded {n} models',
+        model_hint: '— {n} models available, select one —',
         status_generating: 'Generating... (large models may take tens of seconds to load on first use)',
         status_generating_progress: 'Generating... {n} {unit} / {t}s',
         status_done_saved: '✓ Done {n} {unit} / {t}s (saved to history)',
@@ -154,6 +156,7 @@ const I18N = {
         char_unit: '字',
         status_loading_models: 'モデル一覧を読み込み中...',
         status_models_loaded: '{n}個のモデルを読み込みました',
+        model_hint: '— モデル {n} 件、選択してください —',
         status_generating: '生成中...（大型モデルは初回読み込みに数十秒かかる場合があります）',
         status_generating_progress: '生成中... {n} {unit} / {t}s',
         status_done_saved: '✓ 完了 {n} {unit} / {t}s（履歴に保存）',
@@ -197,6 +200,7 @@ const I18N = {
         char_unit: '字',
         status_loading_models: '加载模型列表中...',
         status_models_loaded: '已加载 {n} 个模型',
+        model_hint: '— 共 {n} 个模型，请选择 —',
         status_generating: '生成中...（首次使用大模型需加载，可能等待数十秒）',
         status_generating_progress: '生成中... {n} {unit} / {t}s',
         status_done_saved: '✓ 完成 {n} {unit} / 耗时 {t}s（已存入历史）',
@@ -240,6 +244,7 @@ const I18N = {
         char_unit: '자',
         status_loading_models: '모델 목록 불러오는 중...',
         status_models_loaded: '모델 {n}개를 불러왔습니다',
+        model_hint: '— 모델 {n}개, 선택하세요 —',
         status_generating: '생성 중...(대형 모델은 처음 사용 시 로딩에 수십 초 걸릴 수 있습니다)',
         status_generating_progress: '생성 중... {n} {unit} / {t}s',
         status_done_saved: '✓ 완료 {n} {unit} / {t}s (기록에 저장됨)',
@@ -264,5 +269,46 @@ function t(key, lang) {
     return (key in dict) ? dict[key] : (I18N['zh-TW'][key] != null ? I18N['zh-TW'][key] : key);
 }
 
-window.NOVEL_I18N = { LANGS, OUTPUT_LANGS, GENRES, I18N, t };
+// ===== 生成 prompt 模板：用「輸出語言」本身撰寫指令 =====
+// （英文指令會讓部分中文模型完全不輸出，故依輸出語言切換指令語言）
+const PROMPT_TMPL = {
+    zh: {
+        genre: '類型／風格：',
+        length: (n) => `目標字數：約 ${n} 字`,
+        premise: '關鍵字／大綱：',
+        sample: '參考範文（請模仿其語氣、節奏與寫法，但不要照抄其內容或人物）：',
+        body: '請依上述條件創作一篇結構完整的小說，包含人物刻畫、場景描寫、自然的對白與清晰的情節推進。請直接輸出小說正文，不要輸出標題、說明、大綱或思考過程。',
+        lang: (name) => `請全程使用${name}撰寫整篇小說。`,
+        system: (name) => `你是一位專業的小說家，擅長創作引人入勝、文筆細膩的小說。請確保情節合理、人物立體、場景生動，並全程使用${name}寫作。`,
+    },
+    ja: {
+        genre: 'ジャンル／スタイル：',
+        length: (n) => `目標文字数：約 ${n} 字`,
+        premise: 'キーワード／あらすじ：',
+        sample: '参考文（語り口・リズム・技法を真似てください。内容や登場人物は写さないこと）：',
+        body: '上記の条件に基づき、構成の整った小説を執筆してください。人物描写・情景描写・自然な会話・明確な筋立てを含めること。小説本文のみを出力し、タイトル・説明・あらすじ・思考過程は出力しないでください。',
+        lang: (name) => `小説全体を${name}で書いてください。`,
+        system: (name) => `あなたはプロの小説家です。読者を引き込む繊細な筆致の小説を、筋の整合性・立体的な人物・生き生きとした場面を重視しながら、${name}で自然かつ流暢に執筆してください。`,
+    },
+    ko: {
+        genre: '장르／스타일: ',
+        length: (n) => `목표 분량: 약 ${n}자`,
+        premise: '키워드／개요: ',
+        sample: '참고 예문(어조·리듬·기법을 모방하되 내용이나 인물은 베끼지 마세요): ',
+        body: '위 조건에 따라 구성이 완결된 소설을 작성하세요. 인물 묘사, 장면 묘사, 자연스러운 대화, 명확한 전개를 포함하세요. 소설 본문만 출력하고 제목·설명·개요·사고 과정은 출력하지 마세요.',
+        lang: (name) => `소설 전체를 ${name}(으)로 작성하세요.`,
+        system: (name) => `당신은 전문 소설가입니다. 줄거리의 일관성, 입체적인 인물, 생생한 장면을 중시하며 몰입감 있고 섬세한 문체의 소설을 ${name}(으)로 자연스럽고 유창하게 작성하세요.`,
+    },
+    en: {
+        genre: 'Genre / style: ',
+        length: (n) => `Target length: about ${n} characters/words`,
+        premise: 'Premise / keywords: ',
+        sample: 'Reference writing sample (imitate its tone, rhythm and technique — do NOT copy its content or characters):',
+        body: 'Write a complete, well-structured novel based on the above. Include vivid characterization, scene description, natural dialogue and clear plot progression. Output ONLY the novel body — no title, notes, headings, outline or thinking process.',
+        lang: (name) => `Write the entire novel in ${name}.`,
+        system: (name) => `You are a professional novelist skilled at writing immersive, emotionally engaging fiction with refined prose. Ensure plot coherence, three-dimensional characters and vivid scenes. Write naturally and fluently in ${name}.`,
+    },
+};
+
+window.NOVEL_I18N = { LANGS, OUTPUT_LANGS, GENRES, I18N, PROMPT_TMPL, t };
 })();

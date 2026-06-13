@@ -164,6 +164,59 @@ async def list_models():
     return {"models": models}
 
 
+def _make_think_filter():
+    """過濾模型在 response 中輸出的 <think>...</think> 推理區塊（串流式，可跨 chunk）。"""
+    state = {"in_think": False, "carry": ""}
+    TAG_OPEN, TAG_CLOSE = "<think>", "</think>"
+
+    def _prefix_len(s, tag):
+        # s 結尾有多少字元正好是 tag 的開頭（用來處理跨 chunk 被切斷的標籤）
+        m = min(len(s), len(tag) - 1)
+        for k in range(m, 0, -1):
+            if s[-k:] == tag[:k]:
+                return k
+        return 0
+
+    def feed(piece):
+        s = state["carry"] + piece
+        state["carry"] = ""
+        out = []
+        i, n = 0, len(s)
+        while i < n:
+            if not state["in_think"]:
+                open_idx = s.find(TAG_OPEN, i)
+                close_idx = s.find(TAG_CLOSE, i)
+                cands = [x for x in (open_idx, close_idx) if x != -1]
+                if not cands:
+                    rest = s[i:]
+                    p = max(_prefix_len(rest, TAG_OPEN), _prefix_len(rest, TAG_CLOSE))
+                    if p:
+                        out.append(rest[: len(rest) - p])
+                        state["carry"] = rest[len(rest) - p :]
+                    else:
+                        out.append(rest)
+                    break
+                j = min(cands)
+                out.append(s[i:j])
+                if j == open_idx:
+                    state["in_think"] = True
+                    i = j + len(TAG_OPEN)
+                else:  # 孤立的 </think>，直接移除
+                    i = j + len(TAG_CLOSE)
+            else:
+                close_idx = s.find(TAG_CLOSE, i)
+                if close_idx == -1:
+                    rest = s[i:]
+                    p = _prefix_len(rest, TAG_CLOSE)
+                    state["carry"] = rest[len(rest) - p :] if p else ""
+                    break
+                state["in_think"] = False
+                i = close_idx + len(TAG_CLOSE)
+        return "".join(out)
+
+    return feed
+
+
 @app.post("/api/generate")
 async def generate(req: Request):
     body = await req.json()
@@ -175,13 +228,14 @@ async def generate(req: Request):
 
     system = body.get("system") or ""
     temperature = float(body.get("temperature", 0.8))
-    num_predict = int(body.get("num_predict", 4000))
+    # 下限 1024：思考型模型的 <think> 區塊（會被過濾）可能吃光額度，
+    # 預留底線確保正文一定有生成空間。
+    num_predict = max(int(body.get("num_predict", 4000)), 1024)
 
     payload = {
         "model": model,
         "prompt": prompt,
         "stream": True,
-        "think": False,
         "options": {
             "temperature": temperature,
             "num_predict": num_predict,
@@ -191,11 +245,21 @@ async def generate(req: Request):
         payload["system"] = system
 
     async def event_stream():
-        # 模型載入中時 Ollama 會回 error chunk；自動等待重試（最多約 5 分鐘）
-        max_attempts = 60
-        for attempt in range(1, max_attempts + 1):
-            got_any = False
+        # 兩種自動重試（對使用者透明）：
+        #   1) 模型載入中：Ollama 回 loading error → 等待後重試（最多約 5 分鐘）
+        #   2) 空輸出：部分 merge 模型第一個 token 即為結束符，隨機導致 0 內容 → 立即重試
+        # 僅在出現「實質（非空白）內容」後才開始串流，讓失敗的嘗試不會顯示給使用者。
+        max_loading = 60
+        max_empty = 4
+        loading_attempts = 0
+        empty_attempts = 0
+
+        while True:
+            got_real = False   # 是否已出現實質（非空白）內容
+            buffer = ""        # 實質內容出現前的前導暫存
             loading = False
+            finished = False   # 是否正常收到 done
+            think_filter = _make_think_filter()
             try:
                 async with httpx.AsyncClient(timeout=None) as client:
                     async with client.stream(
@@ -215,31 +279,51 @@ async def generate(req: Request):
 
                             err_msg = chunk.get("error")
                             if err_msg:
-                                if "loading" in err_msg.lower() and not got_any:
+                                if "loading" in err_msg.lower() and not got_real:
                                     loading = True
-                                    break  # 跳出重試
+                                    break
                                 yield f"\n[錯誤] {err_msg}"
                                 return
 
-                            piece = chunk.get("response") or chunk.get("thinking") or ""
+                            # 只取正文 response；thinking 欄位是模型的思考，不顯示。
+                            # response 內若含 <think>...</think> 推理區塊，串流過濾掉。
+                            raw = chunk.get("response") or ""
+                            piece = think_filter(raw) if raw else ""
                             if piece:
-                                got_any = True
-                                yield piece
+                                if got_real:
+                                    yield piece
+                                else:
+                                    buffer += piece
+                                    if piece.strip():
+                                        got_real = True
+                                        yield buffer
+                                        buffer = ""
                             if chunk.get("done"):
-                                return
+                                finished = True
+                                break
             except httpx.HTTPError as e:
-                yield f"\n[ERROR] 串流中斷: {e}"
+                if got_real:
+                    yield f"\n[ERROR] 串流中斷: {e}"
                 return
 
-            if got_any:
+            if got_real:
                 return
             if loading:
+                loading_attempts += 1
+                if loading_attempts > max_loading:
+                    yield "\n[錯誤] 模型載入逾時，請稍候重試或確認模型可用"
+                    return
                 await asyncio.sleep(3)
                 continue
-            # 既沒內容也非載入中（例如模型立即結束）：結束
+            if finished:
+                # 模型直接結束且無實質內容（隨機 EOS）→ 重試
+                empty_attempts += 1
+                if empty_attempts >= max_empty:
+                    yield "\n[提示] 模型多次未產生內容，可能與此模型不相容，請重試或更換模型。"
+                    return
+                continue
+            # 非 loading 非 finished（連線中斷且無 done）→ 結束
             return
-
-        yield "\n[錯誤] 模型載入逾時，請稍候重試或確認模型可用"
 
     return StreamingResponse(event_stream(), media_type="text/plain; charset=utf-8")
 

@@ -526,3 +526,97 @@ button:disabled {
 #detail-content {
     min-height: 400px;
 }
+
+/* ===== 可搜尋下拉選單 ===== */
+.ss-wrap {
+    position: relative;
+}
+
+.row .ss-wrap {
+    flex: 1;
+}
+
+.ss-native {
+    display: none !important;
+}
+
+.ss-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 36px 10px 12px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    cursor: text;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2398a2b3' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+}
+
+.ss-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.15);
+}
+
+.ss-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 50;
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.ss-option {
+    padding: 9px 12px;
+    cursor: pointer;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ss-option:hover,
+.ss-option.active {
+    background: #2a313b;
+}
+
+.ss-option.selected {
+    color: var(--primary);
+}
+
+.ss-empty {
+    padding: 9px 12px;
+    color: var(--text-dim);
+    font-size: 13px;
+}
+
+.ss-panel::-webkit-scrollbar {
+    width: 10px;
+}
+
+.ss-panel::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 5px;
+}
+
+/* 右上角語言切換器較小 */
+.lang-switch .ss-wrap {
+    width: 150px;
+}
+
+.lang-switch .ss-input {
+    background-color: var(--bg-elev);
+    padding: 8px 30px 8px 12px;
+    font-size: 13px;
+}

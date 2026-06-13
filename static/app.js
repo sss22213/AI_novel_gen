@@ -12,7 +12,7 @@ if (!window.NOVEL_I18N) {
     throw new Error('window.NOVEL_I18N is missing — i18n.js failed to load');
 }
 
-const { LANGS, OUTPUT_LANGS, GENRES, I18N, t } = window.NOVEL_I18N;
+const { LANGS, OUTPUT_LANGS, GENRES, I18N, PROMPT_TMPL, t } = window.NOVEL_I18N;
 
 let uiLang = localStorage.getItem('novel_ui_lang') || 'zh-TW';
 if (!(uiLang in LANGS)) uiLang = 'zh-TW';
@@ -165,6 +165,10 @@ function applyI18n() {
     });
     renderGenre();
     renderTemplates(templatesCache);
+    // 模型下拉首項提示（語言切換時同步更新）
+    if (els.model.options.length && els.model.options[0].value === '') {
+        els.model.options[0].textContent = tt('model_hint', { n: els.model.options.length - 1 });
+    }
 }
 
 /* ===== 模型 ===== */
@@ -179,14 +183,19 @@ async function loadModels() {
         const data = await res.json();
         const prev = els.model.value;
         els.model.innerHTML = '';
+        // 首項為提示（value 空字串），取代原本的「已載入 N 個模型」狀態文字
+        const hint = document.createElement('option');
+        hint.value = '';
+        hint.textContent = tt('model_hint', { n: data.models.length });
+        els.model.appendChild(hint);
         for (const m of data.models) {
             const opt = document.createElement('option');
             opt.value = m;
             opt.textContent = m;
             els.model.appendChild(opt);
         }
-        if (prev && data.models.includes(prev)) els.model.value = prev;
-        setStatus(tt('status_models_loaded', { n: data.models.length }), 'success');
+        els.model.value = (prev && data.models.includes(prev)) ? prev : '';
+        setStatus('');
     } catch (e) {
         setStatus(tt('status_load_models_fail') + e.message, 'error');
     }
@@ -310,7 +319,14 @@ function applySettings(s) {
     els.tempValue.textContent = parseFloat(els.temperature.value || 0).toFixed(2);
 }
 
-/* ===== Prompt 組裝（指令用英文，明確指定輸出語言，跨語言最可靠） ===== */
+/* ===== Prompt 組裝 =====
+   指令用「輸出語言」本身撰寫（中文輸出→中文指令）。
+   英文指令會讓部分中文模型完全不輸出，故依語言切換。 */
+function promptTmplKey(code) {
+    if (code === 'zh-TW' || code === 'zh-CN') return 'zh';
+    return PROMPT_TMPL[code] ? code : 'en';
+}
+
 function buildPrompt() {
     const keywords = els.keywords.value.trim();
     const genre = GENRES.find((g) => g.key === els.genre.value);
@@ -318,29 +334,21 @@ function buildPrompt() {
     const langObj = OUTPUT_LANGS.find((l) => l.code === els.language.value) || OUTPUT_LANGS[0];
     const styleSample = els.styleSample.value.trim();
 
+    const T = PROMPT_TMPL[promptTmplKey(langObj.code)];
+    const genreName = genre ? (genre.labels[langObj.code] || genre.prompt) : '';
+
     const lines = [];
-    if (genre && genre.prompt) lines.push(`Genre / style: ${genre.prompt}`);
-    lines.push(`Target length: about ${wordCount} characters/words`);
-    lines.push(`Premise / keywords: ${keywords}`);
-    if (styleSample) {
-        lines.push(
-            'Reference writing sample (imitate its tone, rhythm and technique — do NOT copy its content or characters):\n' +
-            styleSample
-        );
-    }
-    lines.push(
-        'Write a complete, well-structured novel based on the above. Include vivid characterization, scene description, natural dialogue and clear plot progression. Output ONLY the novel body — no title, notes, headings or outline.'
-    );
-    lines.push(`IMPORTANT: Write the entire novel in ${langObj.prompt}.`);
+    if (genreName) lines.push(T.genre + genreName);
+    lines.push(T.length(wordCount));
+    lines.push(T.premise + keywords);
+    if (styleSample) lines.push(T.sample + '\n' + styleSample);
+    lines.push(T.body);
+    lines.push(T.lang(langObj.name));
     return lines.join('\n\n');
 }
 
 function defaultSystem(langObj) {
-    return (
-        'You are a professional novelist skilled at writing immersive, emotionally engaging fiction with refined prose. ' +
-        'Follow the user\'s requirements, ensure plot coherence, three-dimensional characters and vivid scenes. ' +
-        `Write naturally and fluently in ${langObj.prompt}.`
-    );
+    return PROMPT_TMPL[promptTmplKey(langObj.code)].system(langObj.name);
 }
 
 /* ===== 生成 ===== */
@@ -357,7 +365,9 @@ async function generate() {
 
     const prompt = buildPrompt();
     const wordCount = getWordCount();
-    const numPredict = Math.min(Math.ceil(wordCount * 2.5) + 256, 32768);
+    // +1024 token 餘裕：思考型模型會先輸出 <think> 推理區塊（會被過濾掉），
+    // 若預算太小，推理會吃光額度導致正文無法生成。額外餘裕確保正文一定有空間。
+    const numPredict = Math.min(Math.ceil(wordCount * 2.5) + 1024, 32768);
     const langObj = OUTPUT_LANGS.find((l) => l.code === els.language.value) || OUTPUT_LANGS[0];
     const system = els.system.value.trim() || defaultSystem(langObj);
     const settings = gatherSettings();
@@ -652,7 +662,129 @@ els.historyClearAll.addEventListener('click', async () => {
     }
 });
 
+/* ===== 可搜尋下拉選單（純原生，無套件） =====
+   把原生 <select> 隱藏，疊上一個可打字過濾的 input + 選項面板。
+   - 外部用 select.value = x 設定時，攔截 value setter 即時同步顯示文字
+   - 選項被重新 render（innerHTML 重建）時，用 MutationObserver 同步 */
+const SS_NO_MATCH = {
+    'zh-TW': '無相符項目', 'zh-CN': '无相符项目',
+    'en': 'No matches', 'ja': '該当なし', 'ko': '일치 항목 없음',
+};
+
+function makeSearchable(select) {
+    if (!select) return;
+    const valDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+
+    const wrap = document.createElement('div');
+    wrap.className = 'ss-wrap';
+    select.parentNode.insertBefore(wrap, select);
+    wrap.appendChild(select);
+    select.classList.add('ss-native');
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'ss-input';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    wrap.appendChild(input);
+
+    const panel = document.createElement('div');
+    panel.className = 'ss-panel';
+    panel.hidden = true;
+    wrap.appendChild(panel);
+
+    let opts = [];          // 目前面板中（過濾後）的選項 [{value,label}]
+    let activeIndex = -1;
+
+    function currentLabel() {
+        const o = select.options[select.selectedIndex];
+        return o ? o.textContent : '';
+    }
+    function sync() {
+        // 不要在使用者正在輸入時覆蓋
+        if (document.activeElement !== input) input.value = currentLabel();
+    }
+    function highlight() {
+        [...panel.children].forEach((c, i) => c.classList.toggle('active', i === activeIndex));
+        const el = panel.children[activeIndex];
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+    }
+    function renderPanel(filter) {
+        const f = (filter || '').trim().toLowerCase();
+        opts = [...select.options]
+            .map((o) => ({ value: o.value, label: o.textContent }))
+            .filter((o) => !f || o.label.toLowerCase().includes(f));
+        panel.innerHTML = '';
+        if (!opts.length) {
+            const e = document.createElement('div');
+            e.className = 'ss-empty';
+            e.textContent = SS_NO_MATCH[uiLang] || SS_NO_MATCH['en'];
+            panel.appendChild(e);
+            activeIndex = -1;
+            return;
+        }
+        const selVal = select.value;
+        opts.forEach((o) => {
+            const d = document.createElement('div');
+            d.className = 'ss-option' + (o.value === selVal ? ' selected' : '');
+            d.textContent = o.label;
+            d.addEventListener('mousedown', (ev) => {
+                ev.preventDefault();      // 搶在 input blur 之前選取
+                choose(o.value);
+            });
+            panel.appendChild(d);
+        });
+        activeIndex = opts.findIndex((o) => o.value === selVal);
+        if (activeIndex < 0) activeIndex = 0;
+        highlight();
+    }
+    function open() {
+        renderPanel('');
+        panel.hidden = false;
+    }
+    function close() {
+        panel.hidden = true;
+        activeIndex = -1;
+        input.value = currentLabel();
+    }
+    function choose(value) {
+        select.value = value;     // 觸發攔截的 setter → sync()
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        close();
+    }
+
+    input.addEventListener('focus', () => { input.select(); open(); });
+    input.addEventListener('input', () => { renderPanel(input.value); panel.hidden = false; });
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (panel.hidden) open();
+            else { activeIndex = Math.min(activeIndex + 1, opts.length - 1); highlight(); }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeIndex = Math.max(activeIndex - 1, 0); highlight();
+        } else if (e.key === 'Enter') {
+            if (!panel.hidden && opts[activeIndex]) { e.preventDefault(); choose(opts[activeIndex].value); }
+        } else if (e.key === 'Escape') {
+            close(); input.blur();
+        }
+    });
+    input.addEventListener('blur', () => { setTimeout(close, 120); });
+
+    // 攔截外部 select.value = x，讓顯示文字同步
+    Object.defineProperty(select, 'value', {
+        configurable: true,
+        get() { return valDesc.get.call(select); },
+        set(v) { valDesc.set.call(select, v); sync(); },
+    });
+    // 選項被重建時同步顯示
+    new MutationObserver(() => sync()).observe(select, { childList: true });
+
+    sync();
+}
+
 /* ===== 初始化 ===== */
+[els.uiLangSel, els.model, els.template, els.genre, els.language, els.length].forEach(makeSearchable);
 renderUiLangSwitch();
 renderOutputLangs();
 applyI18n();
