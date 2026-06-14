@@ -11,6 +11,9 @@ services:
       # Claude 引擎（容器內由映像安裝的 claude；認證見下方 volumes）
       CLAUDE_BIN: ${CLAUDE_BIN:-claude}
       CLAUDE_MODELS: ${CLAUDE_MODELS:-sonnet,opus,haiku}
+      # Codex 引擎（容器內由映像安裝的 codex；認證見下方 volumes）
+      CODEX_BIN: ${CODEX_BIN:-codex}
+      CODEX_MODELS: ${CODEX_MODELS:-gpt-5.5}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -18,4 +21,7 @@ services:
       # 把主機已登入的 Claude 憑證掛進容器；未設定時掛空目錄 → Claude 引擎顯示不可用，
       # Ollama 仍正常。於 .env 設定 CLAUDE_CREDS_DIR=/home/<你>/.claude 啟用。
       - ${CLAUDE_CREDS_DIR:-./.claude-empty}:/root/.claude
+      # 同理：主機已登入的 Codex 憑證（~/.codex）。於 .env 設定
+      # CODEX_CREDS_DIR=/home/<你>/.codex 啟用 Codex 引擎。
+      - ${CODEX_CREDS_DIR:-./.codex-empty}:/root/.codex
     restart: unless-stopped

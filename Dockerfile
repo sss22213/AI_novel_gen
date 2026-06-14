@@ -11,6 +11,15 @@ RUN apt-get update \
     && (curl -fsSL https://claude.ai/install.sh | bash || echo "claude install skipped")
 ENV PATH="/root/.local/bin:${PATH}"
 
+# 安裝 codex CLI（OpenAI Codex 引擎用）。透過 npm 取得對應平台的二進位，需 Node，
+# 故一併安裝。認證另由 compose 掛載主機的 ~/.codex 提供。失敗（如 build 無網路）
+# 不影響其他功能，Codex 引擎只會顯示為不可用。
+RUN (apt-get update \
+     && apt-get install -y --no-install-recommends nodejs npm \
+     && npm install -g @openai/codex \
+     && rm -rf /var/lib/apt/lists/*) \
+    || echo "codex install skipped"
+
 RUN pip install --no-cache-dir --upgrade pip
 
 COPY requirements.txt .

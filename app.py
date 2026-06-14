@@ -38,11 +38,24 @@ def _claude_label(alias):
     return _CLAUDE_LABELS.get(alias.lower(), alias)
 
 
-def _resolve_claude():
-    """找出 claude CLI 的可執行路徑。
-    優先順序：CLAUDE_BIN（可為絕對路徑或指令名）→ PATH → 常見安裝位置。
+# OpenAI Codex CLI 引擎：透過本機 `codex` 指令（你的 ChatGPT/OpenAI 登入）生成。
+# 需在主機執行模式下，codex 已安裝並在 PATH。
+CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
+# codex -m 接受 OpenAI 模型名稱；逗號分隔，可用環境變數 CODEX_MODELS 覆寫。
+# 預設僅放 gpt-5.5：ChatGPT 帳號登入只支援它；gpt-5 / gpt-5-codex 等需 API key 帳號，
+# 那類帳號可自行用 CODEX_MODELS 加回。
+CODEX_MODELS = [
+    m.strip() for m in os.environ.get("CODEX_MODELS", "gpt-5.5").split(",") if m.strip()
+]
+# codex exec 沙箱模式：read-only 最安全（模型產生的指令唯讀，不會動到檔案系統）。
+CODEX_SANDBOX = os.environ.get("CODEX_SANDBOX", "read-only")
+# 附加給 codex 的額外參數（進階用）
+CODEX_EXTRA_ARGS = shlex.split(os.environ.get("CODEX_EXTRA_ARGS", ""))
+
+
+def _resolve_bin(cand, name):
+    """找出 CLI 可執行路徑：設定值（絕對路徑或指令名）→ PATH → 常見安裝位置。
     找不到回 None。這樣即使 ~/.local/bin 不在 PATH 也能自動找到。"""
-    cand = CLAUDE_BIN
     # 1) 明確路徑（含分隔符）
     if os.path.sep in cand:
         return cand if os.access(cand, os.X_OK) else None
@@ -52,17 +65,34 @@ def _resolve_claude():
         return found
     # 3) 常見安裝位置
     home = os.path.expanduser("~")
-    for p in (
-        os.path.join(home, ".local", "bin", "claude"),
-        os.path.join(home, ".npm-global", "bin", "claude"),
-        os.path.join(home, ".bun", "bin", "claude"),
-        "/usr/local/bin/claude",
-        "/usr/bin/claude",
-        "/opt/homebrew/bin/claude",
+    for d in (
+        os.path.join(home, ".local", "bin"),
+        os.path.join(home, ".npm-global", "bin"),
+        os.path.join(home, ".bun", "bin"),
+        "/usr/local/bin",
+        "/usr/bin",
+        "/opt/homebrew/bin",
     ):
+        p = os.path.join(d, name)
         if os.access(p, os.X_OK):
             return p
     return None
+
+
+def _resolve_claude():
+    return _resolve_bin(CLAUDE_BIN, "claude")
+
+
+def _resolve_codex():
+    return _resolve_bin(CODEX_BIN, "codex")
+
+
+def _codex_authed():
+    """codex 是否已有登入憑證（auth.json）。
+    在 Docker 內 ~/.codex 對應掛載的 CODEX_CREDS_DIR；未掛載則無憑證。"""
+    home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    return os.path.isfile(os.path.join(home, "auth.json"))
+
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
@@ -221,6 +251,16 @@ async def list_models(engine: str = "ollama"):
             "path": resolved,
         }
 
+    if engine == "codex":
+        resolved = _resolve_codex()
+        return {
+            "models": CODEX_MODELS,
+            "labels": {m: m for m in CODEX_MODELS},
+            # 需同時有執行檔與登入憑證才算可用，避免「裝了但沒登入」時才在生成階段噴 401。
+            "available": resolved is not None and _codex_authed(),
+            "path": resolved,
+        }
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.get(f"{OLLAMA_URL}/api/tags")
@@ -313,6 +353,94 @@ async def _claude_stream(model, prompt, system):
         await proc.wait()
 
 
+async def _codex_stream(model, prompt, system):
+    """以本機 codex CLI（exec 子指令、--json 事件流）非互動生成。
+    取 item.completed 中 type=agent_message 的文字；reasoning / 指令事件略過。
+    codex exec 沒有 system-prompt 旗標，故把 system 併入提示詞最前。"""
+    codex_bin = _resolve_codex()
+    if codex_bin is None:
+        yield ("[錯誤] 找不到 codex CLI。請確認主機已安裝並登入，"
+               "或啟動時設定環境變數 CODEX_BIN=/絕對/路徑/codex（主機執行模式）。")
+        return
+
+    full_prompt = (system + "\n\n" + prompt) if system else prompt
+    cmd = [
+        codex_bin, "exec",
+        "--json",
+        "--skip-git-repo-check",   # 工作目錄非 git repo 也能執行
+        "--ephemeral",             # 不留存 session 檔
+        "-s", CODEX_SANDBOX,       # 沙箱（預設 read-only，不會動到檔案系統）
+    ]
+    if model:
+        cmd += ["-m", model]
+    cmd += CODEX_EXTRA_ARGS
+    cmd += [full_prompt]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd="/tmp",
+        )
+    except FileNotFoundError:
+        yield "[錯誤] 找不到 codex CLI。"
+        return
+
+    got = False
+    errored = False
+    try:
+        async for raw in proc.stdout:
+            line = raw.decode("utf-8", "ignore").strip()
+            if not line:
+                continue
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            typ = o.get("type")
+            if typ == "item.completed":
+                item = o.get("item") or {}
+                if item.get("type") == "agent_message":
+                    txt = item.get("text") or ""
+                    if txt:
+                        got = True
+                        yield txt
+            elif typ in ("turn.failed", "error", "thread.error"):
+                raw_err = o.get("error")
+                if isinstance(raw_err, dict):
+                    msg = raw_err.get("message") or raw_err.get("type") or ""
+                elif isinstance(raw_err, str):
+                    msg = raw_err
+                else:
+                    msg = ""
+                if not msg:
+                    msg = o.get("message") or ""
+                # message 可能是內嵌 JSON 字串，取出裡面的人類可讀錯誤
+                if isinstance(msg, str) and msg.lstrip().startswith("{"):
+                    try:
+                        inner = json.loads(msg)
+                        msg = (inner.get("error") or {}).get("message") or inner.get("message") or msg
+                    except (ValueError, TypeError):
+                        pass
+                errored = True
+                yield f"\n[錯誤] Codex CLI：{msg or '生成失敗'}"
+                break
+
+        if not got and not errored:
+            err = (await proc.stderr.read()).decode("utf-8", "ignore").strip()
+            yield "\n[提示] Codex CLI 未產生內容。" + (("錯誤：" + err) if err else "")
+    finally:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        await proc.wait()
+
+
 def _make_think_filter():
     """過濾模型在 response 中輸出的 <think>...</think> 推理區塊（串流式，可跨 chunk）。"""
     state = {"in_think": False, "carry": ""}
@@ -381,6 +509,12 @@ async def generate(req: Request):
     if engine == "claude":
         return StreamingResponse(
             _claude_stream(model, prompt, system),
+            media_type="text/plain; charset=utf-8",
+        )
+
+    if engine == "codex":
+        return StreamingResponse(
+            _codex_stream(model, prompt, system),
             media_type="text/plain; charset=utf-8",
         )
 

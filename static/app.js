@@ -198,9 +198,9 @@ async function loadModels() {
             els.model.appendChild(opt);
         }
         els.model.value = (prev && data.models.includes(prev)) ? prev : '';
-        // Claude 引擎但主機找不到 CLI → 提示
-        if (engine === 'claude' && data.available === false) {
-            setStatus(tt('status_claude_unavailable'), 'error');
+        // CLI 引擎但找不到執行檔或未登入 → 提示
+        if (data.available === false && (engine === 'claude' || engine === 'codex')) {
+            setStatus(tt(engine === 'codex' ? 'status_codex_unavailable' : 'status_claude_unavailable'), 'error');
         } else {
             setStatus('');
         }

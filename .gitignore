@@ -34,3 +34,10 @@ Thumbs.db
 
 # ===== Claude Code（本地設定 / 記憶） =====
 .claude/
+
+# ===== Docker 憑證掛載的空占位目錄 =====
+# 只追蹤 .gitkeep；容器內的 claude/codex 會把快取寫進來，不要追蹤這些。
+.claude-empty/*
+!.claude-empty/.gitkeep
+.codex-empty/*
+!.codex-empty/.gitkeep
