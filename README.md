@@ -1,6 +1,6 @@
 # AI Novel Generator
 
-A web tool for writing novels with **local [Ollama](https://ollama.com/) models or the [Claude](https://claude.com/claude-code) CLI** (your Claude subscription login). Enter a keyword or outline, pick an engine and model, genre, language and length, then stream a novel in real time — with automatic history saving.
+A web tool for writing novels with **local [Ollama](https://ollama.com/) models, the [Claude](https://claude.com/claude-code) CLI, or the [OpenAI Codex](https://github.com/openai/codex) CLI** (using your Claude / ChatGPT subscription login). Enter a keyword or outline, pick an engine and model, genre, language and length, then stream a novel in real time — with automatic history saving.
 
 > ### 🤝 About this project
 > **This project was built collaboratively by a human and an AI (Anthropic Claude).**
@@ -10,9 +10,9 @@ A web tool for writing novels with **local [Ollama](https://ollama.com/) models 
 
 ## ✨ Features
 
-- **Two AI engines** — generate with local **Ollama** models or the **Claude CLI** (your Claude subscription login), switchable from an *AI engine* dropdown. See [Enabling the Claude engine](#enabling-the-claude-engine).
-- **Streaming generation** — text appears word by word as it's written, ChatGPT-style; stop any time. (For Claude "thinking" models, the internal reasoning is filtered out and only the story is streamed.)
-- **Model dropdown** — lists the models for the selected engine: every model installed in your local Ollama (refreshable on demand), or the configured Claude aliases (`opus` / `sonnet` / `haiku`).
+- **Three AI engines** — generate with local **Ollama** models, the **Claude CLI** (Claude subscription), or the **OpenAI Codex CLI** (ChatGPT / OpenAI login), switchable from an *AI engine* dropdown. See [Enabling the Claude / Codex engines](#enabling-the-claude-engine).
+- **Streaming generation** — text appears word by word as it's written, ChatGPT-style; stop any time. (For Claude "thinking" models the internal reasoning is filtered out; Codex returns the finished story when its run completes.)
+- **Model dropdown** — lists the models for the selected engine: every model installed in your local Ollama (refreshable on demand), the configured Claude aliases (`opus` / `sonnet` / `haiku`), or the configured Codex models (`gpt-5.5`…).
 - **Rich writing controls**
   - Genre / style (Wuxia, Sci-Fi, Romance, Mystery, Fantasy, Adult… 12 in total)
   - Length (short / medium / long / very long / custom)
@@ -33,9 +33,9 @@ A web tool for writing novels with **local [Ollama](https://ollama.com/) models 
 
 | Layer | Technology |
 |---|---|
-| Backend | Python + [FastAPI](https://fastapi.tiangolo.com/) + [httpx](https://www.python-httpx.org/) (streaming proxy to Ollama) + `claude` CLI subprocess |
+| Backend | Python + [FastAPI](https://fastapi.tiangolo.com/) + [httpx](https://www.python-httpx.org/) (streaming proxy to Ollama) + `claude` / `codex` CLI subprocesses |
 | Frontend | Vanilla HTML / CSS / JavaScript (no framework, no build step) |
-| Engines | Local [Ollama](https://ollama.com/) · [Claude](https://claude.com/claude-code) CLI (subscription login) |
+| Engines | Local [Ollama](https://ollama.com/) · [Claude](https://claude.com/claude-code) CLI · [OpenAI Codex](https://github.com/openai/codex) CLI |
 | Deployment | Docker / Docker Compose |
 | Storage | JSON files (history, custom templates), persisted via a mounted volume |
 
@@ -46,7 +46,8 @@ A web tool for writing novels with **local [Ollama](https://ollama.com/) models 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
 - [Ollama](https://ollama.com/) installed and running on the host, with at least one model pulled
 - Enough RAM / VRAM to load the models you intend to use
-- *(Optional — for the Claude engine)* the [Claude CLI](https://claude.com/claude-code) logged in. It's bundled into the Docker image; you only need to mount your credentials (see [Enabling the Claude engine](#enabling-the-claude-engine)). For local runs, install and log in to `claude` on the host.
+- *(Optional — for the Claude engine)* the [Claude CLI](https://claude.com/claude-code) logged in. It's bundled into the Docker image; you only need to mount your credentials (see [Enabling the Claude / Codex engines](#enabling-the-claude-engine)). For local runs, install and log in to `claude` on the host.
+- *(Optional — for the Codex engine)* the [OpenAI Codex CLI](https://github.com/openai/codex) logged in. Same as above: bundled into the image, mount your `~/.codex` credentials; for local runs, install and `codex login` on the host.
 
 ---
 
@@ -93,6 +94,9 @@ cp .env.example .env
 | `CLAUDE_CREDS_DIR` | *(empty)* | Absolute path to your logged-in Claude credentials (usually `~/.claude`), mounted into the container to enable the Claude engine. Empty → Claude engine stays unavailable (Ollama still works). |
 | `CLAUDE_MODELS` | `sonnet,opus,haiku` | Comma-separated Claude model aliases shown in the dropdown (`claude --model` accepts aliases). |
 | `CLAUDE_BIN` | `claude` | Path to the `claude` executable (defaults to the version installed in the image). |
+| `CODEX_CREDS_DIR` | *(empty)* | Absolute path to your logged-in Codex credentials (usually `~/.codex`), mounted into the container to enable the Codex engine. Empty → Codex engine stays unavailable. |
+| `CODEX_MODELS` | `gpt-5.5` | Comma-separated Codex models (`codex exec -m`). ChatGPT-account logins only support `gpt-5.5`; `gpt-5` / `gpt-5-codex` etc. need an API-key account. |
+| `CODEX_BIN` | `codex` | Path to the `codex` executable (defaults to the version installed in the image). |
 
 > **Can't reach Ollama?** Make sure Ollama listens on all interfaces: `OLLAMA_HOST=0.0.0.0 ollama serve`, or switch the compose file to `network_mode: host`.
 
@@ -113,14 +117,40 @@ Claude subscription login), selectable from the **AI engine** dropdown.
   it is auto-detected (via `PATH` or common install locations such as
   `~/.local/bin/claude`). Set `CLAUDE_BIN` to an absolute path to override.
 
+### Enabling the Codex engine
+
+Works the same way as Claude, using the [OpenAI Codex CLI](https://github.com/openai/codex).
+
+- **Docker:** the image installs `codex`; point `CODEX_CREDS_DIR` at your host
+  `~/.codex`:
+
+  ```bash
+  echo "CODEX_CREDS_DIR=$HOME/.codex" >> .env
+  docker compose up -d --build
+  ```
+
+- **Local (no Docker):** have `codex` installed and `codex login` done on the
+  host; it is auto-detected (`PATH` or `~/.local/bin/codex`).
+
+Notes:
+
+- The engine shows as **unavailable** unless both the `codex` binary *and* a
+  login (`~/.codex/auth.json`) are present — so you get an upfront warning
+  instead of a failure at generation time.
+- With a **ChatGPT-account** login, only `gpt-5.5` is available; `gpt-5`,
+  `gpt-5.1` and `gpt-5-codex` require an **API-key** account (add them via
+  `CODEX_MODELS`).
+- ChatGPT-login credentials may not authenticate from inside a container; if
+  Codex 401s under Docker, run the app on the host instead.
+
 ---
 
 ## 📡 API
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/models?engine=ollama\|claude` | List models for the engine: installed Ollama models, or Claude aliases (with availability + resolved path) |
-| `POST` | `/api/generate` | Stream-generate a novel (plain-text stream). Request body includes `engine` (`ollama` or `claude`) |
+| `GET` | `/api/models?engine=ollama\|claude\|codex` | List models for the engine: installed Ollama models, or Claude / Codex models (with availability + resolved path) |
+| `POST` | `/api/generate` | Stream-generate a novel (plain-text stream). Request body includes `engine` (`ollama`, `claude` or `codex`) |
 | `GET` | `/api/history` | History list (summaries) |
 | `POST` | `/api/history` | Add a history record |
 | `GET` | `/api/history/{id}` | Get one record (full text + settings) |
@@ -136,9 +166,9 @@ Claude subscription login), selectable from the **AI engine** dropdown.
 
 ```
 .
-├── app.py                # FastAPI backend (Ollama + Claude engines, generation stream, history, templates)
+├── app.py                # FastAPI backend (Ollama + Claude + Codex engines, generation stream, history, templates)
 ├── requirements.txt
-├── Dockerfile            # Python image; also installs the claude CLI
+├── Dockerfile            # Python image; also installs the claude & codex CLIs
 ├── docker-compose.yml
 ├── .env.example          # Configuration template (copy to .env)
 ├── static/
@@ -156,7 +186,7 @@ Claude subscription login), selectable from the **AI engine** dropdown.
 
 ## 💡 Tips
 
-- **Pick the right model**: for fiction on Ollama, prefer non-"thinking" instruct models (e.g. Gemma, Qwen2.5-Instruct, Llama). "Thinking" models such as `qwen3*` / `gpt-oss` spend part of their budget on internal reasoning; the app filters that out and gives the story room to generate, but instruct models still give the best experience. On the **Claude** engine, `opus` gives the strongest prose and `haiku` the fastest.
+- **Pick the right model**: for fiction on Ollama, prefer non-"thinking" instruct models (e.g. Gemma, Qwen2.5-Instruct, Llama). "Thinking" models such as `qwen3*` / `gpt-oss` spend part of their budget on internal reasoning; the app filters that out and gives the story room to generate, but instruct models still give the best experience. On the **Claude** engine, `opus` gives the strongest prose and `haiku` the fastest. On the **Codex** engine with a ChatGPT-account login, use `gpt-5.5`.
 - **First load takes time**: large models (20GB+) need tens of seconds to load on the first generation. The screen stays on "Generating…" during this — that's normal; output begins once loading finishes.
 - **"Adult" genre**: ordinary instruct models may refuse; pair it with an uncensored / abliterated model.
 - **Your data**: history and custom templates live in `data/`. Back it up yourself; `docker compose down` does not delete it (it's a host-mounted volume).
