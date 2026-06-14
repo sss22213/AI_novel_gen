@@ -201,6 +201,15 @@ async def index():
     )
 
 
+@app.get("/read")
+async def reader():
+    # 行動裝置閱讀頁：從歷史挑一篇小說舒適閱讀
+    return FileResponse(
+        STATIC_DIR / "read.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
 @app.get("/api/models")
 async def list_models(engine: str = "ollama"):
     if engine == "claude":

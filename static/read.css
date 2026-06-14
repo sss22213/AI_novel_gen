@@ -1,0 +1,117 @@
+/* ===== 行動裝置閱讀頁 ===== */
+* { box-sizing: border-box; }
+
+:root {
+    --reader-font: 19px;
+}
+
+/* 三種閱讀主題 */
+body[data-theme="dark"] {
+    --bg: #14171f; --surface: #1b1f29; --surface-2: #222735;
+    --text: #e4e7ec; --dim: #98a2b3; --border: #2c333d; --accent: #7c5cff;
+    --shadow: rgba(0,0,0,.45);
+}
+body[data-theme="sepia"] {
+    --bg: #f3ead6; --surface: #efe5cd; --surface-2: #e8dcbf;
+    --text: #463a28; --dim: #8a7a5c; --border: #ddcca6; --accent: #9a6b2f;
+    --shadow: rgba(120,100,60,.22);
+}
+body[data-theme="light"] {
+    --bg: #ffffff; --surface: #f6f7f9; --surface-2: #eef0f3;
+    --text: #1a1d24; --dim: #667085; --border: #e3e6eb; --accent: #6b46e5;
+    --shadow: rgba(0,0,0,.12);
+}
+
+html, body { margin: 0; padding: 0; }
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    -webkit-text-size-adjust: 100%;
+    transition: background .2s, color .2s;
+}
+
+/* 頂端閱讀進度條 */
+.reader-progress {
+    position: fixed; top: 0; left: 0; height: 3px; width: 0;
+    background: var(--accent); z-index: 100; transition: width .1s linear;
+}
+
+.view { min-height: 100vh; }
+
+/* 頂部列 */
+.topbar {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px; padding-top: calc(12px + env(safe-area-inset-top));
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+}
+.topbar-title { font-size: 18px; font-weight: 700; margin: 0; flex: 1; }
+.topbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+.iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 40px; height: 40px; padding: 0 10px;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    font-size: 15px; cursor: pointer; text-decoration: none;
+    -webkit-tap-highlight-color: transparent; user-select: none;
+}
+.iconbtn:active { background: var(--surface-2); }
+
+.lang-mini {
+    height: 40px; background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 0 8px; font-size: 13px; max-width: 130px;
+}
+
+/* ===== 小說列表 ===== */
+.novel-list { padding: 12px 14px 40px; display: flex; flex-direction: column; gap: 10px; }
+.novel-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px 16px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; transition: transform .08s, border-color .15s;
+}
+.novel-card:active { transform: scale(.985); border-color: var(--accent); }
+.novel-card h2 {
+    margin: 0 0 6px; font-size: 16px; font-weight: 600; line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.novel-card .meta { font-size: 12px; color: var(--dim); margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.novel-card .preview {
+    font-size: 13px; color: var(--dim); line-height: 1.6;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.empty { text-align: center; color: var(--dim); padding: 80px 24px; line-height: 2; }
+.btn-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+
+/* ===== 閱讀內容 ===== */
+.reader-bar .reader-title {
+    flex: 1; min-width: 0; font-size: 14px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.reader-content {
+    max-width: 42rem; margin: 0 auto; padding: 22px 20px 8px;
+    padding-left: calc(20px + env(safe-area-inset-left));
+    padding-right: calc(20px + env(safe-area-inset-right));
+    font-family: "Noto Serif CJK TC", "Songti TC", "Source Han Serif", Georgia, "Times New Roman", serif;
+    font-size: var(--reader-font);
+    line-height: 2.05;
+    letter-spacing: .01em;
+    white-space: pre-wrap;
+    word-break: break-word;
+    text-align: justify;
+}
+.reader-meta {
+    max-width: 42rem; margin: 0 auto;
+    padding: 8px 20px calc(48px + env(safe-area-inset-bottom));
+    color: var(--dim); font-size: 12px; border-top: 1px solid var(--border);
+    margin-top: 16px;
+}
+
+@media (min-width: 768px) {
+    .reader-content { font-size: calc(var(--reader-font) + 1px); padding-top: 32px; }
+}

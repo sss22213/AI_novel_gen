@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+    <meta name="theme-color" content="#14171f">
+    <title data-i18n="reader_title">閱讀</title>
+    <link rel="stylesheet" href="/static/read.css?v=1">
+</head>
+<body data-theme="dark">
+    <div id="progress" class="reader-progress"></div>
+
+    <!-- ===== 列表視圖 ===== -->
+    <section id="list-view" class="view">
+        <header class="topbar">
+            <h1 class="topbar-title" data-i18n="reader_list_title">選擇小說</h1>
+            <div class="topbar-actions">
+                <select id="ui-lang" class="lang-mini" title="Language"></select>
+                <a class="iconbtn" href="/" data-i18n-title="reader_create" title="創作">✍</a>
+            </div>
+        </header>
+        <div id="list" class="novel-list"></div>
+        <div id="empty" class="empty" hidden>
+            <p data-i18n="reader_empty">還沒有任何小說</p>
+            <a class="btn-link" href="/" data-i18n="reader_go_create">前往創作 →</a>
+        </div>
+    </section>
+
+    <!-- ===== 閱讀視圖 ===== -->
+    <section id="read-view" class="view" hidden>
+        <header class="topbar reader-bar">
+            <button id="back" class="iconbtn" data-i18n-title="reader_back" title="返回">←</button>
+            <div class="reader-title" id="r-title"></div>
+            <div class="topbar-actions">
+                <button id="font-dec" class="iconbtn" title="A−">A−</button>
+                <button id="font-inc" class="iconbtn" title="A＋">A＋</button>
+                <button id="theme-btn" class="iconbtn" data-i18n-title="reader_theme" title="主題">◐</button>
+            </div>
+        </header>
+        <article id="content" class="reader-content"></article>
+        <div class="reader-meta" id="r-meta"></div>
+    </section>
+
+    <script src="/static/i18n.js?v=6"></script>
+    <script src="/static/read.js?v=1"></script>
+</body>
+</html>

@@ -47,6 +47,27 @@ header {
     position: absolute;
     top: 0;
     right: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.reader-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 17px;
+    text-decoration: none;
+    line-height: 1;
+}
+
+.reader-link:hover {
+    border-color: var(--primary);
 }
 
 .lang-switch select {
@@ -619,4 +640,85 @@ button:disabled {
     background-color: var(--bg-elev);
     padding: 8px 30px 8px 12px;
     font-size: 13px;
+}
+
+/* ===================================================================
+   響應式 / 行動裝置
+   置於檔案最後，確保同特異度時覆寫順序勝出。
+   =================================================================== */
+
+/* 平板以下：歷史頁也收成單欄
+   （.layout.layout-history 特異度高於稍前的 .layout-history） */
+@media (max-width: 960px) {
+    .layout.layout-history {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 手機 */
+@media (max-width: 600px) {
+    .container {
+        padding: 14px;
+    }
+    header {
+        margin-bottom: 18px;
+    }
+    header h1 {
+        font-size: 23px;
+        letter-spacing: 0.5px;
+    }
+    .subtitle {
+        font-size: 13px;
+    }
+    /* 語言切換 + 閱讀連結置於頂端右側一列 */
+    .lang-switch {
+        position: static;
+        justify-content: flex-end;
+        margin-bottom: 10px;
+    }
+
+    .panel {
+        padding: 15px;
+    }
+
+    /* 防止 iOS 聚焦輸入時自動放大：可輸入欄位字級需 >= 16px */
+    .field select,
+    .field input[type="number"],
+    .field input[type="text"],
+    .field textarea,
+    .ss-input,
+    .lang-switch .ss-input {
+        font-size: 16px;
+    }
+
+    /* 輸出區：手機上降低最小高度，避免一開啟就要捲很久 */
+    .output {
+        min-height: 260px;
+        max-height: 60vh;
+        padding: 16px;
+        font-size: 16px;
+    }
+    .output-header {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    /* 歷史清單在單欄時自然流動，不要內部限高捲動 */
+    .history-list {
+        max-height: none;
+    }
+    #detail-content {
+        min-height: 240px;
+    }
+
+    .tab-btn {
+        padding: 9px 18px;
+    }
+}
+
+/* 觸控裝置沒有 hover：歷史卡片的刪除鈕常駐顯示 */
+@media (hover: none) {
+    .history-card-del {
+        opacity: 1;
+    }
 }
